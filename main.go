@@ -31,6 +31,7 @@ func (i IndexEntry) String() string {
 func main() {
 	Store()
 	Load()
+	Find("bbb/c")
 }
 
 func Store() {
@@ -141,6 +142,78 @@ func Load() {
 		}
 
 		println(index.String())
+	}
+
+	indexFile.Close()
+	dataFile.Close()
+}
+
+func Find(searchKey string) {
+	indexFile, err := os.Open("index.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	dataFile, err := os.Open("data.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	for {
+		keySizeBin := make([]byte, 4)
+		err := binary.Read(indexFile, binary.BigEndian, keySizeBin)
+		if err != nil {
+			break
+		}
+
+		keySize := binary.BigEndian.Uint32(keySizeBin)
+
+		keyBin := make([]byte, keySize)
+		binary.Read(indexFile, binary.BigEndian, keyBin)
+
+		key := string(keyBin)
+
+		dataOffsetBin := make([]byte, 4)
+		binary.Read(indexFile, binary.BigEndian, dataOffsetBin)
+
+		dataOffset := binary.BigEndian.Uint32(dataOffsetBin)
+
+		index := IndexEntry{
+			keySize:    keySize,
+			key:        key,
+			dataOffset: dataOffset,
+		}
+
+		if index.key == searchKey {
+			dataFile.Seek(int64(index.dataOffset), 0)
+
+			dataKeySizeBin := make([]byte, 4)
+			binary.Read(dataFile, binary.BigEndian, dataKeySizeBin)
+
+			dataKeySize := binary.BigEndian.Uint32(dataKeySizeBin)
+
+			dataValueSizeBin := make([]byte, 4)
+			binary.Read(dataFile, binary.BigEndian, dataValueSizeBin)
+
+			dataValueSize := binary.BigEndian.Uint32(dataValueSizeBin)
+
+			dataKeyBin := make([]byte, dataKeySize)
+			binary.Read(indexFile, binary.BigEndian, dataKeyBin)
+
+			dataKey := string(keyBin)
+
+			data := DataEntry{
+				keySize:   dataKeySize,
+				valueSize: dataValueSize,
+				key:       dataKey,
+				value:     nil,
+			}
+
+			println("---")
+			println(data.String())
+
+			break
+		}
 	}
 
 	indexFile.Close()
