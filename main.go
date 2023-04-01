@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"github.com/huandu/skiplist"
+	"os"
 )
 
 type DataEntry struct {
@@ -29,15 +30,15 @@ func main() {
 
 	el := list.Front()
 
-	//indexFile, err := os.Open("index.bin")
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//dataFile, err := os.Open("data.bin")
-	//if err != nil {
-	//	panic(err)
-	//}
+	indexFile, err := os.Create("index.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	dataFile, err := os.Create("data.bin")
+	if err != nil {
+		panic(err)
+	}
 
 	dataOffset := 0
 	indexOffset := 0
@@ -63,7 +64,14 @@ func main() {
 
 		indexSize := binary.Size(index.keySize) + binary.Size(index.key) + binary.Size(index.dataOffset)
 
-		println(indexOffset, dataOffset)
+		binary.Write(dataFile, binary.BigEndian, data.keySize)
+		binary.Write(dataFile, binary.BigEndian, data.valueSize)
+		binary.Write(dataFile, binary.BigEndian, data.key)
+		binary.Write(dataFile, binary.BigEndian, data.value)
+
+		binary.Write(indexFile, binary.BigEndian, index.keySize)
+		binary.Write(indexFile, binary.BigEndian, index.key)
+		binary.Write(indexFile, binary.BigEndian, index.dataOffset)
 
 		dataOffset += dataSize
 		indexOffset += indexSize
@@ -71,6 +79,6 @@ func main() {
 		el = el.Next()
 	}
 
-	//indexFile.Close()
-	//dataFile.Close()
+	indexFile.Close()
+	dataFile.Close()
 }
