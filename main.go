@@ -85,9 +85,11 @@ func main() {
 	Store(list2, "index2.bin", "data2.bin")
 
 	Load("index1.bin", "data1.bin")
-	Find("bbb/a/b", "index2.bin", "data2.bin")
+	Find("bbb/a/b", "index_compacted.bin", "data_compacted.bin")
 
 	Compact()
+
+	Find("bbb/a/b", "index2.bin", "data2.bin")
 }
 
 func Store(list *skiplist.SkipList, indexFilePath string, dataFilePath string) {
@@ -128,8 +130,8 @@ func Store(list *skiplist.SkipList, indexFilePath string, dataFilePath string) {
 			dataOffset: uint32(dataOffset),
 		}
 
-		WriteDataRow(dataFile, data)
-		WriteIndexRow(indexFile, index)
+		WriteDataRow(dataFile, &data)
+		WriteIndexRow(indexFile, &index)
 
 		dataOffset += data.BinarySize()
 		indexOffset += index.BinarySize()
@@ -184,7 +186,7 @@ func Load(indexFilePath string, dataFilePath string) {
 	dataFile.Close()
 }
 
-func ReadDataRow(dataFile *os.File, dataOffset int64) *DataEntry {
+func ReadDataRowAtOffset(dataFile *os.File, dataOffset int64) *DataEntry {
 	dataFile.Seek(dataOffset, 0)
 
 	dataKeySizeBin := make([]byte, 4)
@@ -225,7 +227,50 @@ func ReadDataRow(dataFile *os.File, dataOffset int64) *DataEntry {
 	}
 }
 
-func WriteDataRow(dataFile *os.File, dataEntry DataEntry) {
+func ReadDataRow(dataFile *os.File) *DataEntry {
+	dataKeySizeBin := make([]byte, 4)
+	err := binary.Read(dataFile, binary.BigEndian, dataKeySizeBin)
+	if err != nil {
+		return nil
+	}
+
+	dataKeySize := binary.BigEndian.Uint32(dataKeySizeBin)
+
+	dataValueSizeBin := make([]byte, 4)
+	binary.Read(dataFile, binary.BigEndian, dataValueSizeBin)
+	dataValueSize := binary.BigEndian.Uint32(dataValueSizeBin)
+
+	dataTimestampBin := make([]byte, 8)
+	binary.Read(dataFile, binary.BigEndian, dataTimestampBin)
+	dataTimestamp := binary.BigEndian.Uint64(dataTimestampBin)
+
+	dataTombstoneBin := make([]byte, 1)
+	binary.Read(dataFile, binary.BigEndian, dataTombstoneBin)
+	dataTombstone := false
+	if dataTombstoneBin[0] == 1 {
+		dataTombstone = true
+	}
+
+	dataKeyBin := make([]byte, dataKeySize)
+	binary.Read(dataFile, binary.BigEndian, dataKeyBin)
+	dataKey := string(dataKeyBin)
+
+	dataValueBin := make([]byte, dataValueSize)
+	if dataValueSize != 0 {
+		binary.Read(dataFile, binary.BigEndian, dataValueBin)
+	}
+
+	return &DataEntry{
+		keySize:   dataKeySize,
+		valueSize: dataValueSize,
+		timestamp: dataTimestamp,
+		tombstone: dataTombstone,
+		key:       dataKey,
+		value:     dataValueBin,
+	}
+}
+
+func WriteDataRow(dataFile *os.File, dataEntry *DataEntry) {
 	binKey := []byte(dataEntry.key)
 
 	binary.Write(dataFile, binary.BigEndian, dataEntry.keySize)
@@ -262,7 +307,7 @@ func ReadIndexRow(indexFile *os.File) *IndexEntry {
 	}
 }
 
-func WriteIndexRow(indexFile *os.File, indexEntry IndexEntry) {
+func WriteIndexRow(indexFile *os.File, indexEntry *IndexEntry) {
 	binKey := []byte(indexEntry.key)
 
 	binary.Write(indexFile, binary.BigEndian, indexEntry.keySize)
@@ -289,7 +334,7 @@ func Find(searchKey string, indexFilePath string, dataFilePath string) {
 		}
 
 		if index.key == searchKey {
-			data := ReadDataRow(dataFile, int64(index.dataOffset))
+			data := ReadDataRowAtOffset(dataFile, int64(index.dataOffset))
 
 			println("---")
 			println(data.String())
@@ -303,5 +348,88 @@ func Find(searchKey string, indexFilePath string, dataFilePath string) {
 }
 
 func Compact() {
+	dataFile1, err := os.Open("data1.bin")
+	if err != nil {
+		panic(err)
+	}
 
+	dataFile2, err := os.Open("data2.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	compactedIndexFile, err := os.Create("index_compacted.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	compactedDataFile, err := os.Create("data_compacted.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	dataOffset := 0
+
+	data1 := ReadDataRow(dataFile1)
+	data2 := ReadDataRow(dataFile2)
+
+	readNext1 := false
+	readNext2 := false
+
+	for {
+		if readNext1 {
+			data1 = ReadDataRow(dataFile1)
+		}
+
+		if readNext2 {
+			data2 = ReadDataRow(dataFile2)
+		}
+
+		if data1 == nil && data2 == nil {
+			break
+		}
+
+		var data *DataEntry
+
+		readNext1 = false
+		readNext2 = false
+
+		if data1 == nil {
+			data = data2
+			readNext2 = true
+		} else if data2 == nil {
+			data = data1
+			readNext1 = true
+		} else {
+			if data1.key == data2.key {
+				if data1.timestamp > data2.timestamp {
+					data = data1
+				} else {
+					data = data2
+				}
+
+				readNext1 = true
+				readNext2 = true
+			} else {
+				if data1.key > data2.key {
+					data = data1
+					readNext1 = true
+				} else {
+					data = data2
+					readNext2 = true
+				}
+			}
+		}
+
+		index := IndexEntry{
+			keySize:    data.keySize,
+			key:        data.key,
+			dataOffset: uint32(dataOffset),
+		}
+
+		WriteDataRow(compactedDataFile, data)
+		WriteIndexRow(compactedIndexFile, &index)
+
+		dataOffset += data.BinarySize()
+	}
 }
