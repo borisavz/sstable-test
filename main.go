@@ -47,7 +47,7 @@ func (d *DataEntry) BinarySize() int {
 }
 
 func (d *DataEntry) String() string {
-	return fmt.Sprintf("DataEntry[keySize: %d, valueSize: %d, tombstone: %t, key: %s, value: ???]", d.keySize, d.valueSize, d.tombstone, d.key)
+	return fmt.Sprintf("DataEntry[keySize: %d, valueSize: %d, timestamp: %d, tombstone: %t, key: %s, value: ???]", d.keySize, d.valueSize, d.timestamp, d.tombstone, d.key)
 }
 
 type IndexEntry struct {
@@ -84,10 +84,16 @@ func main() {
 	Store(list1, "index1.bin", "data1.bin")
 	Store(list2, "index2.bin", "data2.bin")
 
-	Load("index1.bin", "data1.bin")
-	Find("bbb/a/b", "index_compacted.bin", "data_compacted.bin")
+	//Find("bbb/a/b", "index_compacted.bin", "data_compacted.bin")
 
 	Compact()
+
+	LoadDataFile("data1.bin")
+	println("---")
+	LoadDataFile("data2.bin")
+	println("---")
+	LoadDataFile("data_compacted.bin")
+	println("---")
 
 	Find("bbb/a/b", "index2.bin", "data2.bin")
 }
@@ -143,46 +149,22 @@ func Store(list *skiplist.SkipList, indexFilePath string, dataFilePath string) {
 	dataFile.Close()
 }
 
-func Load(indexFilePath string, dataFilePath string) {
-	indexFile, err := os.Open(indexFilePath)
-	if err != nil {
-		panic(err)
-	}
-
+func LoadDataFile(dataFilePath string) {
 	dataFile, err := os.Open(dataFilePath)
 	if err != nil {
 		panic(err)
 	}
 
 	for {
-		keySizeBin := make([]byte, 4)
-		err := binary.Read(indexFile, binary.BigEndian, keySizeBin)
-		if err != nil {
+		data := ReadDataRow(dataFile)
+
+		if data == nil {
 			break
 		}
 
-		keySize := binary.BigEndian.Uint32(keySizeBin)
-
-		keyBin := make([]byte, keySize)
-		binary.Read(indexFile, binary.BigEndian, keyBin)
-
-		key := string(keyBin)
-
-		dataOffsetBin := make([]byte, 4)
-		binary.Read(indexFile, binary.BigEndian, dataOffsetBin)
-
-		dataOffset := binary.BigEndian.Uint32(dataOffsetBin)
-
-		index := IndexEntry{
-			keySize:    keySize,
-			key:        key,
-			dataOffset: dataOffset,
-		}
-
-		println(index.String())
+		println(data.String())
 	}
 
-	indexFile.Close()
 	dataFile.Close()
 }
 
@@ -411,7 +393,7 @@ func Compact() {
 				readNext1 = true
 				readNext2 = true
 			} else {
-				if data1.key > data2.key {
+				if data1.key < data2.key {
 					data = data1
 					readNext1 = true
 				} else {
@@ -419,6 +401,10 @@ func Compact() {
 					readNext2 = true
 				}
 			}
+		}
+
+		if data.tombstone {
+			continue
 		}
 
 		index := IndexEntry{
